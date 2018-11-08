@@ -138,6 +138,9 @@ TM=1
 #
 #ENABLE_SUDO_TESTS=y
 
+# use REAL_HW | NFIT_TEST along with ENABLE_SUDO_TESTS
+# BADBLOCK_TESTS_TYPE="REAL_HW"
+
 #
 # The 'nfit' tests test the code handling bad blocks.
 # They use the 'sudo' command many times and insert the 'nfit_test' kernel

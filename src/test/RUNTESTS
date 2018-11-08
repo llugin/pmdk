@@ -43,9 +43,9 @@ usage()
 	[ "$1" ] && echo Error: $1
 	cat >&2 <<EOF
 Usage: $0 [ -hnv ] [ -b build-type ] [ -t test-type ] [ -f fs-type ]
-		[ -o timeout ] [ -s test-file | -u test-sequence ] [-k skip-dir ]
-		[ -m memcheck ] [-p pmemcheck ] [ -e helgrind ] [ -d drd ] [ -c ]
-		[ -q provider ] [ -r persistency-method ]
+		[ -w bad-block-test-type ] [ -o timeout ] [ -s test-file | -u test-sequence ]
+		[-k skip-dir ] [ -m memcheck ] [-p pmemcheck ] [ -e helgrind ]
+		[ -d drd ] [ -c ] [ -q provider ] [ -r persistency-method ]
 		[tests...]
 -h			print this help message
 -n			dry run
@@ -58,6 +58,8 @@ Usage: $0 [ -hnv ] [ -b build-type ] [ -t test-type ] [ -f fs-type ]
 -k skip-dir		skip a specific test directory
 -f fs-type		run tests only on specified file systems
 			fs-type: pmem, non-pmem, any, none, all (default)
+-w bad-block-test-type	run bad block tests on specific persistent memory type only
+			bad-block-type: none (default), REAL_HW, NFIT_TEST
 -o timeout		set timeout for test execution
 			timeout: floating point number with an optional suffix: 's' for seconds
 			(the default), 'm' for minutes, 'h' for hours or 'd' for days.

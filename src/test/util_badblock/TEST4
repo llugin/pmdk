@@ -37,16 +37,11 @@
 #                                 - list, clear and list again
 #                                   bad blocks in dax device
 #
-
 . ../unittest/unittest.sh
-
 require_test_type medium
-require_fs_type non-pmem
-require_linked_with_ndctl ./util_badblock$EXESUFFIX
-
-require_nfit_tests_enabled
+require_fs_type none
+require_bad_block_tests_enabled dax_device
 require_sudo_allowed
-require_kernel_module nfit_test
 require_linked_with_ndctl ./util_badblock$EXESUFFIX
 require_command ndctl
 
@@ -54,20 +49,21 @@ setup
 
 . ../common_badblock.sh
 
-ndctl_nfit_test_init
-
-DEVICE=$(ndctl_nfit_test_get_dax_device)
-NAMESPACE=$(ndctl_nfit_test_get_namespace_of_device $DEVICE)
+badblock_test_init dax_device
 FULLDEV="/dev/$DEVICE"
 
 # inject bad block: OFF=11 LEN=1
-ndctl_inject_error $NAMESPACE 11 1
+OFF=11
+LEN=1
+ndctl_inject_error $NAMESPACE $OFF $LEN
 
-expect_bad_blocks
+expect_bad_blocks $NAMESPACE
 
 expect_normal_exit ./util_badblock$EXESUFFIX $FULLDEV l c l
 
-ndctl_nfit_test_fini
+badblock_clear_dax_device_fini $NAMESPACE $OFF $LEN
+
+badblock_test_fini
 
 check
 

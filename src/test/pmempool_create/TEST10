@@ -38,12 +38,11 @@
 . ../unittest/unittest.sh
 
 require_test_type medium
-require_fs_type non-pmem
+#require_fs_type non-pmem
 require_build_type debug nondebug
 
-require_nfit_tests_enabled
+require_bad_block_tests_enabled dax_device
 require_sudo_allowed
-require_kernel_module nfit_test
 require_linked_with_ndctl $PMEMPOOL$EXESUFFIX
 require_command ndctl
 
@@ -51,10 +50,10 @@ setup
 
 . ../common_badblock.sh
 
-ndctl_nfit_test_init
+badblock_test_init
 
-DEVICE=$(ndctl_nfit_test_get_dax_device)
-NAMESPACE=$(ndctl_nfit_test_get_namespace_of_device $DEVICE)
+DEVICE=$(badblock_test_get_dax_device)
+NAMESPACE=$(ndctl_get_namespace_of_device $DEVICE)
 FULLDEV="/dev/$DEVICE"
 
 LOG=out${UNITTEST_NUM}.log
@@ -66,18 +65,25 @@ create_poolset $POOLSET AUTO:$FULLDEV:x
 expect_normal_exit $PMEMPOOL$EXESUFFIX rm $POOLSET
 
 # inject bad block: OFF=11 LEN=1
-ndctl_inject_error $NAMESPACE 11 1
+OFF=11
+LEN=1
+ndctl_inject_error $NAMESPACE $OFF $LEN
 
-expect_bad_blocks
+expect_bad_blocks $NAMESPACE
 
 #
 # When the compat feature POOL_FEAT_CHECK_BAD_BLOCKS is enabled by default,
 # 'expect_normal_exit' should be replaced with 'expect_abnormal_exit'.
 #
-expect_normal_exit "$PMEMPOOL$EXESUFFIX create obj --layout pmempool$SUFFIX $POOLSET &>> $LOG"
-
-ndctl_nfit_test_fini
+expect_abnormal_exit "$PMEMPOOL$EXESUFFIX create obj --layout pmempool$SUFFIX $POOLSET &>> $LOG"
 
 check
+
+#clear bad block
+expect_normal_exit $PMEMPOOL$EXESUFFIX create obj -fb $FULLDEV
+expect_normal_exit $PMEMPOOL$EXESUFFIX rm -f $FULLDEV
+
+badblock_clear_dax_device_fini $NAMESPACE $OFF $LEN
+badblock_test_fini
 
 pass

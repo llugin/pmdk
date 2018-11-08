@@ -30,7 +30,6 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #
-set -e
 
 # make sure we have a well defined locale for string operations here
 export LC_ALL="C"
@@ -3666,4 +3665,27 @@ function turn_on_checking_bad_blocks_node()
 	FILE=$2
 
 	expect_normal_exit run_on_node $1 "../pmempool feature -e CHECK_BAD_BLOCKS $FILE &>> $PREP_LOG_FILE"
+}
+
+#
+# require_bad_block_tests_enabled -
+#
+function require_bad_block_tests_enabled() {
+    local DEVICE=$1
+
+	if [ "$BADBLOCK_TESTS_TYPE" == "NFIT_TEST" ]; then
+	    require_kernel_module nfit_test
+    elif [ "$BADBLOCK_TESTS_TYPE" == "REAL_HW" ]; then
+        if [ "$DEVICE" == "block_device" ]; then
+            require_fs_type pmem
+        elif [ "$DEVICE" == "dax_device" ]; then
+            require_dax_devices 1
+        else
+            msg "$UNITTEST_NAME: SKIP: invalid device type provided"
+            exit 0
+         fi
+    else
+        msg "$UNITTEST_NAME: SKIP: bad block tests are not enabled in testconfig.sh"
+		exit 0
+	fi
 }

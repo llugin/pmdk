@@ -56,9 +56,20 @@ COMMAND_NDCTL_NFIT_TEST_FINI="\
 	sudo modprobe -r nfit_test &>>$PREP_LOG_FILE"
 
 #
+# get_mount_dir -- get absolute path to directory where tests should be ran
+#
+function get_mount_dir() {
+
+	echo $MOUNT_DIR
+}
+
+#
 # ndctl_nfit_test_init -- reset all regions and reload the nfit_test module
 #
 function ndctl_nfit_test_init() {
+	require_nfit_tests_enabled
+	require_kernel_module nfit_test
+
 	sudo ndctl disable-region all &>>$PREP_LOG_FILE
 	if ! sudo modprobe -r nfit_test &>>$PREP_LOG_FILE; then
 		MOUNTED_DIRS="$(eval $COMMAND_MOUNTED_DIRS)"
@@ -67,6 +78,58 @@ function ndctl_nfit_test_init() {
 		sudo modprobe -r nfit_test
 	fi
 	expect_normal_exit $COMMAND_NDCTL_NFIT_TEST_INIT
+}
+
+#
+# badblock_test_init -- initialize badblock test based on underlying hardware
+#
+function badblock_test_init() {
+	case "$1"
+	in
+	dax_device|block_device)
+		;;
+	*)
+		usage "bad test-type: $1"
+		;;
+	esac
+
+	case "$BADBLOCK_TESTS_TYPE"
+	in
+	NFIT_TEST|REAL_HW)
+		;;
+	*)
+		echo "Invalid BADBLOCK_TESTS_TYPE value: "$BADBLOCK_TESTS_TYPE"" &>> $PREP_LOG_FILE
+		exit 1
+		;;
+	esac
+
+	if [ "$BADBLOCK_TESTS_TYPE" == "NFIT_TEST" ]; then
+		ndctl_nfit_test_init 
+	fi
+
+	if [ "$1" == "dax_device" ]; then
+		DEVICE=$(badblock_test_get_dax_device)
+	elif [ "$1" == "block_device" ]; then
+		DEVICE=$(badblock_test_get_block_device)
+		MOUNT_DIR=$(prepare_mount_dir $DEVICE)
+	fi
+	FULLDEV="/dev/$DEVICE"
+	NAMESPACE=$(ndctl_get_namespace_of_device $DEVICE)
+}
+
+function prepare_mount_dir() {
+	if [ "$BADBLOCK_TESTS_TYPE" == "REAL_HW" ]; then
+		TEST_DIR="$PMEM_FS_DIR/mnt-pmem"
+		if [ ! -d $TEST_DIR ]; then
+			mkdir -p $TEST_DIR
+		fi
+		MOUNT_DIR=$TEST_DIR
+	else
+		MOUNT_DIR="$DIR/mnt-pmem"
+		local FULLDEV="/dev/$1"
+		ndctl_nfit_test_mount_pmem $FULLDEV $MOUNT_DIR
+	fi
+	echo $MOUNT_DIR
 }
 
 #
@@ -85,6 +148,20 @@ function ndctl_nfit_test_init_node() {
 }
 
 #
+# badblock_test_init_node -- initialize badblock test based on underlying hardware on a remote node
+#
+function badblock_test_init_node() {
+	if [ "$BADBLOCK_TESTS_TYPE" == "NFIT_TEST" ]; then
+		ndct_nfit_test_init_node $1
+	elif [ "$BADBLOCK_TESTS_TYPE" == "REAL_HW" ]; then
+		:
+	else
+		echo "Invalid BADBLOCK_TESTS_TYPE value: "$BADBLOCK_TESTS_TYPE"" &>> $PREP_LOG_FILE
+		exit 1
+	fi
+}
+
+#
 # ndctl_nfit_test_fini -- disable all regions, remove the nfit_test module
 #                         and (optionally) umount the pmem block device
 #
@@ -95,6 +172,15 @@ function ndctl_nfit_test_fini() {
 	MOUNT_DIR=$1
 	[ $MOUNT_DIR ] && sudo umount $MOUNT_DIR &>> $PREP_LOG_FILE
 	expect_normal_exit $COMMAND_NDCTL_NFIT_TEST_FINI
+}
+
+#
+# badblock_test_fini -- clean badblock test based on underlying hardware
+#
+function badblock_test_fini() {
+	if [ "$BADBLOCK_TESTS_TYPE" == "NFIT_TEST" ]; then
+		ndctl_nfit_test_fini $1
+	fi
 }
 
 #
@@ -109,6 +195,15 @@ function ndctl_nfit_test_fini_node() {
 	MOUNT_DIR=$2
 	[ $MOUNT_DIR ] && expect_normal_exit run_on_node $1 "sudo umount $MOUNT_DIR &>> $PREP_LOG_FILE"
 	expect_normal_exit run_on_node $1 "$COMMAND_NDCTL_NFIT_TEST_FINI"
+}
+
+#
+# badblock_test_fini_node -- clean badblock test based on underlying hardware on a remote node
+#
+function badblock_test_fini_node() {
+	if [ "$BADBLOCK_TESTS_TYPE" == "NFIT_TEST" ]; then
+		ndct_nfit_test_fini_node $1 $2
+	fi
 }
 
 #
@@ -147,6 +242,20 @@ function ndctl_nfit_test_mount_pmem_node() {
 }
 
 #
+# prepare_pmem_node -- mount a pmem block device in case of emulated pmem on remote node only
+#
+# Input arguments:
+# 1) number of a node
+# 2) path of a pmem block device
+# 3) mount directory
+#
+function prepare_pmem_node() {
+	if [ "$BADBLOCK_TESTS_TYPE" == "NFIT_TEST" ]; then
+		ndctl_nfit_test_mount_pmem_node $1 $2 $3 &>/dev/null
+	fi
+}
+
+#
 # ndctl_nfit_test_get_device -- create a namespace and get name of the pmem device
 #                               of the nfit_test module
 #
@@ -162,6 +271,7 @@ function ndctl_nfit_test_get_device() {
 
 	BUS="nfit_test.0"
 	REGION=$(ndctl list -b $BUS -t pmem -Ri | sed "/dev/!d;s/[\", ]//g;s/dev://g" | tail -1)
+
 	DEVICE=$(sudo ndctl create-namespace -b $BUS -r $REGION -f -m $MODE -a 4096 | sed "/$DEVTYPE/!d;s/[\", ]//g;s/$DEVTYPE://g")
 	echo $DEVICE
 }
@@ -187,26 +297,35 @@ function ndctl_nfit_test_get_device_node() {
 }
 
 #
-# ndctl_nfit_test_get_dax_device -- create a namespace and get name of the dax device
-#                                   of the nfit_test module
+# badblock_test_get_dax_device -- get name of the dax device
 #
-function ndctl_nfit_test_get_dax_device() {
+function badblock_test_get_dax_device() {
+	DEVICE=""
+	if [ "$BADBLOCK_TESTS_TYPE" == "REAL_HW" ]; then
+		local FULLDEV=${DEVICE_DAX_PATH[0]}
+		DEVICE=${FULLDEV##*/}
+	elif [ "$BADBLOCK_TESTS_TYPE" == "NFIT_TEST" ]; then
+		# XXX needed by libndctl (it should be removed when it is not needed)
+		sudo chmod o+rw /dev/ndctl*
 
-	# XXX needed by libndctl (it should be removed when it is not needed)
-	sudo chmod o+rw /dev/ndctl*
-
-	DEVICE=$(ndctl_nfit_test_get_device devdax)
-	sudo chmod o+rw /dev/$DEVICE
+		DEVICE=$(ndctl_nfit_test_get_device devdax)
+		sudo chmod o+rw /dev/$DEVICE
+	fi
 	echo $DEVICE
 }
 
 #
-# ndctl_nfit_test_get_block_device -- create a namespace and get name of the pmem block device
-#                                     of the nfit_test module
+# badblock_test_get_block_device -- get name of the block device
 #
-function ndctl_nfit_test_get_block_device() {
-	DEVICE=$(ndctl_nfit_test_get_device fsdax)
-	echo $DEVICE
+function badblock_test_get_block_device() {
+	DEVICE=""
+	if [ "$BADBLOCK_TESTS_TYPE" == "REAL_HW" ]; then
+		local FULL_DEV=$(mount | grep $PMEM_FS_DIR | cut -f 1 -d" ")
+		DEVICE=${FULL_DEV##*/}
+	elif [ "$BADBLOCK_TESTS_TYPE" == "NFIT_TEST" ]; then
+		DEVICE=$(ndctl_nfit_test_get_device fsdax)
+	fi
+	echo "$DEVICE"
 }
 
 #
@@ -272,31 +391,30 @@ function ndctl_requires_extra_access()
 }
 
 #
-# ndctl_nfit_test_get_namespace_of_device -- get namespace of the pmem device
+# ndctl_get_namespace_of_device -- get namespace of the pmem device
 #
 # Input argument:
 # 1) a name of pmem device
 #
-function ndctl_nfit_test_get_namespace_of_device() {
-	DEVICE=$1
-	NAMESPACE=$(ndctl list | grep -e "$DEVICE" -e namespace | grep -B1 -e "$DEVICE" | head -n1 | cut -d'"' -f4)
+function ndctl_get_namespace_of_device() {
+	local DEVICE=$1
+	NAMESPACE=$(ndctl list | grep -e $DEVICE -e namespace | grep -B1 -e $DEVICE | head -n1 | cut -d'"' -f4)
 	MODE=$(ndctl list -n "$NAMESPACE" | grep mode | cut -d'"' -f4)
 
-	if ndctl_requires_extra_access $MODE ; then
+	if [ "$BADBLOCK_TESTS_TYPE" == "NFIT_TEST" ] && ndctl_requires_extra_access $MODE; then
 		ndctl_nfit_test_grant_access $DEVICE
 	fi
-
-	echo $NAMESPACE
+	echo "$NAMESPACE"
 }
 
 #
 # ndctl_nfit_test_get_namespace_of_device_node -- get namespace of the pmem device on a remote node
 #
-# Input arguments:
-# 1) node number
-# 2) name of pmem device
+# Input argument:
+# 1) a node number
+# 2) a name of pmem device
 #
-function ndctl_nfit_test_get_namespace_of_device_node() {
+function ndctl_get_namespace_of_device_node() {
 	DEVICE=$2
 	NAMESPACE=$(expect_normal_exit run_on_node $1 ndctl list | grep -e "$DEVICE" -e namespace | grep -B1 -e "$DEVICE" | head -n1 | cut -d'"' -f4)
 	MODE=$(expect_normal_exit run_on_node $1 ndctl list -n "$NAMESPACE" | grep mode | cut -d'"' -f4)
@@ -306,6 +424,36 @@ function ndctl_nfit_test_get_namespace_of_device_node() {
 	fi
 
 	echo $NAMESPACE
+}
+
+#
+# ndctl_badblock_clear_fini --
+#
+function ndctl_badblock_clear_fini() {
+	echo "ndctl inject-error --uninject --block=$2 --count=$3 $1"
+	sudo ndctl inject-error --uninject --block=$2 --count=$3 $1 &>/dev/null
+}
+
+#
+# badblock_clear_dax_device_fini --
+#
+function badblock_clear_dax_device_fini() {
+	NAMESPACE=$1
+	BLOCK=$2
+	COUNT=$3
+	ndctl_badblock_clear_fini $NAMESPACE $BLOCK $COUNT
+}
+
+#
+# badblock_clear_block_device_fini --
+#
+function badblock_clear_block_device_fini() {
+	FULLDEV=$1
+	NAMESPACE=$2
+	BLOCK=$3
+	COUNT=$4
+	sudo dd if=/dev/zero of="$FULLDEV" bs=512 seek="$BLOCK" count="$COUNT" oflag=direct &>/dev/null
+	ndctl_badblock_clear_fini $NAMESPACE $BLOCK $COUNT
 }
 
 #
@@ -321,39 +469,39 @@ function ndctl_inject_error() {
 	local BLOCK=$2
 	local COUNT=$3
 
-	echo "# sudo ndctl inject-error --block=$BLOCK --count=$COUNT $NAMESPACE" >> $PREP_LOG_FILE
-	sudo ndctl inject-error --block=$BLOCK --count=$COUNT $NAMESPACE  &>> $PREP_LOG_FILE
+	if [ "$BADBLOCK_TESTS_TYPE" == "REAL_HW" ]; then
+		sudo ndctl inject-error --block=$BLOCK --count=$COUNT $NAMESPACE  &>> $PREP_LOG_FILE
+	elif [ "$BADBLOCK_TESTS_TYPE" == "NFIT_TEST" ]; then
+		echo "# sudo ndctl inject-error --block=$BLOCK --count=$COUNT $NAMESPACE" 
+		sudo ndctl inject-error --block=$BLOCK --count=$COUNT $NAMESPACE  &>> $PREP_LOG_FILE
 
-	echo "# sudo ndctl start-scrub" >> $PREP_LOG_FILE
-	sudo ndctl start-scrub &>> $PREP_LOG_FILE
+		echo "# sudo ndctl start-scrub" >> $PREP_LOG_FILE
+		sudo ndctl start-scrub &>> $PREP_LOG_FILE
 
-	echo "# sudo ndctl wait-scrub" >> $PREP_LOG_FILE
-	sudo ndctl wait-scrub &>> $PREP_LOG_FILE
+		echo " ndctl wait-scrub" >> $PREP_LOG_FILE
+		ndctl wait-scrub &>> $PREP_LOG_FILE
 
-	echo "(done: ndctl wait-scrub)" >> $PREP_LOG_FILE
+		echo "(done: ndctl wait-scrub)" >> $PREP_LOG_FILE
+	fi
 }
 
 #
 # print_bad_blocks -- print all bad blocks (count, offset and length)
-#                     or "No bad blocks found" if there are no bad blocks
+#                     or "No bad blocks found" if there are no bad blocks for given namespace
 #
 function print_bad_blocks {
-	# XXX sudo should be removed when it is not needed
-	sudo ndctl list -M | \
-		grep -e "badblock_count" -e "offset" -e "length" >> $LOG \
-		|| echo "No bad blocks found" >> $LOG
+	ndctl list -M -n $1 | grep -e "badblock_count" -e "offset" -e "length" >> $LOG || echo "No bad blocks found" >> $LOG
 }
 
 #
-# expect_bad_blocks -- verify if there are required bad blocks
+# expect_bad_blocks -- verify if there are required bad blocks for given namespace
 #                      and fail if they are not there
 #
 function expect_bad_blocks {
-	# XXX sudo should be removed when it is not needed
-	sudo ndctl list -M | grep -e "badblock_count" -e "offset" -e "length" >> $LOG && true
+	NAMESPACE=$1
+	ndctl list -M -n $NAMESPACE | grep -e "badblock_count" -e "offset" -e "length" >> $LOG && true
 	if [ $? -ne 0 ]; then
-		# XXX sudo should be removed when it is not needed
-		sudo ndctl list -M &>> $PREP_LOG_FILE && true
+		ndctl list -M &>> $PREP_LOG_FILE && true
 		msg "====================================================================="
 		msg "Error occurred, the preparation log ($PREP_LOG_FILE) is listed below:"
 		msg ""
@@ -365,12 +513,10 @@ function expect_bad_blocks {
 }
 
 #
-# expect_bad_blocks -- verify if there are required bad blocks
-#                      and fail if they are not there
+# expect_bad_blocks_node -- verify if there are required bad blocks for given namespace on remote node
+#                           and fail if they are not there
 #
 function expect_bad_blocks_node {
-	# XXX sudo should be removed when it is not needed
-	expect_normal_exit run_on_node $1 sudo ndctl list -M | \
-		grep -e "badblock_count" -e "offset" -e "length" >> $LOG \
-		|| fatal "Error: ndctl failed to inject or retain bad blocks (node $1)"
+	expect_normal_exit run_on_node $1 ndctl list -M -n $1 | grep -e "badblock_count" -e "offset" -e "length" >> $LOG || fatal "Error: ndctl failed to inject or retain bad blocks"
 }
+

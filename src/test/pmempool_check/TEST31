@@ -38,59 +38,63 @@
 . ../unittest/unittest.sh
 
 require_test_type medium
-require_fs_type non-pmem
+#require_fs_type non-pmem
 require_build_type debug nondebug
-
-require_nfit_tests_enabled
+echo 1
 require_sudo_allowed
-require_kernel_module nfit_test
 require_linked_with_ndctl $PMEMPOOL$EXESUFFIX
 require_command ndctl
-
+echo 2
 setup
-
+echo 3
 . ../common_badblock.sh
-
-ndctl_nfit_test_init
-
-DEVICE=$(ndctl_nfit_test_get_block_device)
-NAMESPACE=$(ndctl_nfit_test_get_namespace_of_device $DEVICE)
+echo 4
+badblock_test_init
+echo 5
+DEVICE=$(badblock_test_get_block_device)
+NAMESPACE=$(ndctl_get_namespace_of_device $DEVICE)
+echo 6
 FULLDEV="/dev/$DEVICE"
-MOUNT_DIR="$DIR/mnt-pmem"
-
-ndctl_nfit_test_mount_pmem $FULLDEV $MOUNT_DIR
-
+MOUNT_DIR=$(get_mount_dir)
+echo 7
+prepare_pmem $FULLDEV $MOUNT_DIR
+echo 8
 LOG=out${UNITTEST_NUM}.log
 rm -f $LOG && touch $LOG
-
+echo 9
 POOLSET=$DIR/testset1
 create_poolset $POOLSET 10M:$DIR/testfile0:z 10M:$MOUNT_DIR/testfile1:z 10M:$DIR/testfile2:z \
 			R 30M:$DIR/testfile3:z
-
+echo 10
 expect_normal_exit $PMEMPOOL$EXESUFFIX rm $POOLSET
 expect_normal_exit $PMEMPOOL$EXESUFFIX create obj --layout pmempool$SUFFIX $POOLSET
-
+echo 11
 turn_on_checking_bad_blocks $POOLSET
-
+echo 12
 # inject bad block:
 FIRST_SECTOR=$(expect_normal_exit $EXTENTS $MOUNT_DIR/testfile1 -l 0)
-ndctl_inject_error $NAMESPACE $FIRST_SECTOR 1
-
-expect_bad_blocks
+echo 121
+LEN=1
+echo "VARS: $NAMESPACE $FIRST_SECTOR $LEN"
+ndctl_inject_error $NAMESPACE $FIRST_SECTOR $LEN
+echo 13
+expect_bad_blocks $NAMESPACE
 
 expect_normal_exit "$PMEMPOOL$EXESUFFIX info --bad-blocks=yes $POOLSET >> $LOG"
 
-expect_bad_blocks
+expect_bad_blocks $NAMESPACE
 
 expect_abnormal_exit "$PMEMPOOL$EXESUFFIX check -v $POOLSET >> $LOG"
 
-expect_bad_blocks
+expect_bad_blocks $NAMESPACE
 
 expect_normal_exit "$PMEMPOOL$EXESUFFIX info --bad-blocks=yes $POOLSET >> $LOG"
 
-expect_bad_blocks
+expect_bad_blocks $NAMESPACE
 
-ndctl_nfit_test_fini $MOUNT_DIR
+badblock_clear_block_device_fini $FULLDEV $NAMESPACE $FIRST_SECTOR $LEN
+rm -f $FILE
+badblock_test_fini $MOUNT_DIR
 
 check
 
