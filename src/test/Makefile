@@ -361,9 +361,6 @@ sparse  : TARGET = sparse
 
 DIR_SYNC=$(TOP)/src/test/.sync-dir
 SYNC_EXT=synced
-TESTCONFIG=$(TOP)/src/test/testconfig.sh
-CHECK_MAX_MMAP=$(TOP)/src/test/tools/anonymous_mmap/check_max_mmap.sh
-FILE_MAX_DAX_DEVICES=$(TOP)/src/test/tools/anonymous_mmap/max_dax_devices
 
 all test format sparse: $(TESTS_BUILD)
 
@@ -373,7 +370,6 @@ cstyle: $(TESTS_BUILD)
 clean clobber: $(TESTS_BUILD)
 	$(RM) -r $(DIR_SYNC)
 	$(RM) *.$(SYNC_EXT)
-	$(RM) $(FILE_MAX_DAX_DEVICES)
 
 $(TESTS) $(OBJ_DEPS) $(LIBPMEMPOOL_DEPS) $(LIBPMEMPOOL_MOD_DEPS) $(VMMALLOC_DUMMY_FUNCS_DEPS): $(TEST_DEPS)
 
@@ -395,16 +391,15 @@ memcheck-summary-errors:
 memcheck-summary-leaks:
 	grep "in use at exit" */memcheck*.log | grep -v " 0 bytes in 0 blocks" || true
 
-$(FILE_MAX_DAX_DEVICES): $(TESTCONFIG) $(CHECK_MAX_MMAP)
-	@./tools/anonymous_mmap/check_max_mmap.sh
+pycheck:
+	./RUNTESTS.py $(RUNTEST_OPTIONS)
+	echo "No failures."
 
-global-checks: $(TEST_DEPS) $(FILE_MAX_DAX_DEVICES)
-
-check: sync-remotes global-checks
+check: sync-remotes
 	@./RUNTESTS $(RUNTEST_OPTIONS) $(TESTS)
 	@echo "No failures."
 
-check-remote-quiet: sync-remotes global-checks
+check-remote-quiet: sync-remotes
 	@MAKEFLAGS="$(MAKEFLAGS)" ./RUNTESTS $(RUNTEST_OPTIONS) $(REMOTE_TESTS)
 
 sync-remotes: test
@@ -459,14 +454,14 @@ pcheck-vmmalloc: $(VMMALLOC_TESTS)
 pcheck-local-quiet: TARGET = pcheck
 pcheck-local-quiet: $(LOCAL_TESTS)
 
-$(LOCAL_TESTS): global-checks
-
 pcheck-local: pcheck-local-quiet
 	@echo "No failures."
 
 pcheck-remote: TARGET = pcheck
 pcheck-remote: $(REMOTE_TESTS)
 	@echo "No failures."
+
+TESTCONFIG=$(TOP)/src/test/testconfig.sh
 
 $(TESTCONFIG):
 
@@ -497,5 +492,4 @@ endif
 .PHONY: all check clean clobber cstyle pcheck pcheck-blk pcheck-log pcheck-obj\
 	 pcheck-other pcheck-pmem pcheck-pmempool pcheck-vmem pcheck-vmmalloc\
 	 test unittest tools check-remote format pcheck-libpmempool\
-	 pcheck-rpmem pcheck-local pcheck-remote sync-remotes $(TESTS_BUILD)\
-	 global-checks
+	 pcheck-rpmem pcheck-local pcheck-remote sync-remotes $(TESTS_BUILD)
