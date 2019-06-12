@@ -1,5 +1,5 @@
 /*
- * Copyright 2015-2018, Intel Corporation
+ * Copyright 2015-2019, Intel Corporation
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -153,7 +153,7 @@ struct ulog_entry_val *ulog_entry_val_create(struct ulog *ulog,
 struct ulog_entry_buf *
 ulog_entry_buf_create(struct ulog *ulog, size_t offset,
 	uint64_t *dest, const void *src, uint64_t size,
-	ulog_operation_type type, const struct pmem_ops *p_ops);
+	ulog_operation_type type, const struct pmem_ops *p_ops, int drain);
 
 void ulog_entry_apply(const struct ulog_entry_base *e, int persist,
 	const struct pmem_ops *p_ops);

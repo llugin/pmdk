@@ -1,5 +1,5 @@
 /*
- * Copyright 2016-2018, Intel Corporation
+ * Copyright 2016-2019, Intel Corporation
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -76,8 +76,8 @@ void operation_resume(struct operation_context *ctx);
 
 void operation_delete(struct operation_context *ctx);
 
-int operation_add_buffer(struct operation_context *ctx,
-	void *dest, void *src, size_t size, ulog_operation_type type);
+int operation_add_buffer(struct operation_context *ctx, void *dest,
+	void *src, size_t size, ulog_operation_type type, int drain);
 
 int operation_add_entry(struct operation_context *ctx,
 	void *ptr, uint64_t value, ulog_operation_type type);
