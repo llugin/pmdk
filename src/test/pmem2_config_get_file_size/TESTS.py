@@ -38,7 +38,7 @@ class TEST0(t.BaseTest):
     test_type = t.Short
 
     def run(self, ctx):
-        ctx.exec('pmem2_config_get_file_size', 'notset_fd', 'x', '0')
+        ctx.exec('pmem2_config_get_file_size', 'notset_fd', '', '0')
 
 class TEST1(t.BaseTest):
     test_type = t.Short
