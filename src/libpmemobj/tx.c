@@ -1066,8 +1066,8 @@ pmemobj_tx_add_snapshot(struct tx *tx, struct tx_range_def *snapshot)
 	 */
 	void *ptr = OBJ_OFF_TO_PTR(tx->pop, snapshot->offset);
 
-	VALGRIND_ADD_TO_TX(ptr, snapshot->size);
-	int drain = (int)~(snapshot->flags & POBJ_XADD_NO_DRAIN);
+	int drain = (int)!(snapshot->flags & POBJ_XADD_NO_DRAIN);
+		VALGRIND_ADD_TO_TX(ptr, snapshot->size);
 
 	/* do nothing */
 	if (snapshot->flags & POBJ_XADD_NO_SNAPSHOT)

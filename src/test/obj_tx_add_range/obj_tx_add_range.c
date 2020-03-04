@@ -115,8 +115,8 @@ do_tx_add_range_alloc_commit(PMEMobjpool *pop)
 		TOID_ASSIGN(obj, do_tx_zalloc(pop, TYPE_OBJ));
 		UT_ASSERT(!TOID_IS_NULL(obj));
 
-		ret = pmemobj_tx_add_range(obj.oid, VALUE_OFF, VALUE_SIZE);
-		UT_ASSERTeq(ret, 0);
+//		ret = pmemobj_tx_add_range(obj.oid, VALUE_OFF, VALUE_SIZE);
+//		UT_ASSERTeq(ret, 0);
 
 		D_RW(obj)->value = TEST_VALUE_1;
 
@@ -582,32 +582,91 @@ do_tx_xadd_range_no_snapshot_fields(PMEMobjpool *pop)
 static void
 do_tx_xadd_range_no_drain_commit(PMEMobjpool *pop)
 {
+
 	TOID(struct no_drain_object) obj;
-	TOID_ASSIGN(obj, do_tx_zalloc(pop, 2));
-
 	int tmp[NO_DRAIN_SIZE];
-	memcpy(tmp, D_RO(obj)->data, NO_DRAIN_SIZE);
-	TX_BEGIN(pop) {
-		TX_XADD_FIELD(obj, data[1], POBJ_XADD_NO_DRAIN);
-		D_RW(obj)->data[1] = 1;
-		tmp[1] = 1;
 
-		TX_XADD_FIELD(obj, data[3], POBJ_XADD_NO_DRAIN);
-		D_RW(obj)->data[3] = 3;
-		tmp[3] = 3;
+	/* positive test case */
+	{
+		TOID_ASSIGN(obj, do_tx_zalloc(pop, 2));
+		memcpy(tmp, D_RO(obj)->data, NO_DRAIN_SIZE);
 
-		TX_XADD_FIELD(obj, data[5], POBJ_XADD_NO_DRAIN);
-		D_RW(obj)->data[5] = 5;
-		tmp[5] = 5;
+		TX_BEGIN(pop) {
+			TX_XADD_FIELD(obj, data[1], POBJ_XADD_NO_DRAIN);
+			TX_XADD_FIELD(obj, data[3], POBJ_XADD_NO_DRAIN);
+			TX_XADD_FIELD(obj, data[5], POBJ_XADD_NO_DRAIN);
+			TX_ADD_FIELD(obj, data[7]);
+			D_RW(obj)->data[1] = 1;
+			tmp[1] = 1;
 
-		TX_ADD_FIELD(obj, data[7]);
-		D_RW(obj)->data[7] = 7;
-		tmp[7] = 7;
-	} TX_ONABORT {
-		UT_ASSERT(0);
-	} TX_END
+			D_RW(obj)->data[3] = 3;
+			tmp[3] = 3;
 
-	UT_ASSERTeq(memcmp(D_RO(obj)->data, tmp, NO_DRAIN_SIZE), 0);
+			D_RW(obj)->data[5] = 5;
+			tmp[5] = 5;
+
+			D_RW(obj)->data[7] = 7;
+			tmp[7] = 7;
+		} TX_ONABORT {
+			UT_ASSERT(0);
+		} TX_END
+
+		UT_ASSERTeq(memcmp(D_RO(obj)->data, tmp, NO_DRAIN_SIZE), 0);
+	}
+
+	/* modify the data before drain, expect pmemcheck error */
+	{
+		TOID_ASSIGN(obj, do_tx_zalloc(pop, 2));
+		memcpy(tmp, D_RO(obj)->data, NO_DRAIN_SIZE);
+
+		TX_BEGIN(pop) {
+			TX_XADD_FIELD(obj, data[1], POBJ_XADD_NO_DRAIN);
+			TX_XADD_FIELD(obj, data[3], POBJ_XADD_NO_DRAIN);
+			TX_XADD_FIELD(obj, data[5], POBJ_XADD_NO_DRAIN);
+			D_RW(obj)->data[1] = 1;
+			tmp[1] = 1;
+
+			TX_ADD_FIELD(obj, data[7]);
+
+			D_RW(obj)->data[3] = 3;
+			tmp[3] = 3;
+
+			D_RW(obj)->data[5] = 5;
+			tmp[5] = 5;
+
+			D_RW(obj)->data[7] = 7;
+			tmp[7] = 7;
+		} TX_ONABORT {
+			UT_ASSERT(0);
+		} TX_END
+
+		UT_ASSERTeq(memcmp(D_RO(obj)->data, tmp, NO_DRAIN_SIZE), 0);
+	}
+
+	/* Do not drain the transaction, expect pmemcheck error */
+	{
+		TOID_ASSIGN(obj, do_tx_zalloc(pop, 2));
+		memcpy(tmp, D_RO(obj)->data, NO_DRAIN_SIZE);
+
+		TX_BEGIN(pop) {
+			TX_XADD_FIELD(obj, data[1], POBJ_XADD_NO_DRAIN);
+			TX_XADD_FIELD(obj, data[3], POBJ_XADD_NO_DRAIN);
+			TX_XADD_FIELD(obj, data[4], POBJ_XADD_NO_DRAIN);
+			D_RW(obj)->data[1] = 1;
+			tmp[1] = 1;
+
+			D_RW(obj)->data[3] = 3;
+			tmp[3] = 3;
+
+			D_RW(obj)->data[4] = 4;
+			tmp[4] = 4;
+
+		} TX_ONABORT {
+			UT_ASSERT(0);
+		} TX_END
+
+		UT_ASSERTeq(memcmp(D_RO(obj)->data, tmp, NO_DRAIN_SIZE), 0);
+	}
 }
 
 /*
