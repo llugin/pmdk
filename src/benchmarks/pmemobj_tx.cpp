@@ -1085,6 +1085,126 @@ obj_tx_realloc_exit(struct benchmark *bench, struct benchmark_args *args)
 	return obj_tx_exit(bench, args);
 }
 
+/*
+ * dupa_init -- specific part of the obj_tx_add_range
+ * benchmark initialization.
+ */
+static int
+dupa_init(struct benchmark *bench, struct benchmark_args *args)
+{
+	auto *obj_args = (struct obj_tx_args *)args->opts;
+	obj_args->parse_mode = PARSE_OP_MODE_ADD_RANGE;
+	if (args->n_ops_per_thread > MAX_OPS)
+		args->n_ops_per_thread = MAX_OPS;
+	if (obj_tx_init(bench, args) != 0)
+		return -1;
+
+	auto *obj_bench = (struct obj_tx_bench *)pmembench_get_priv(bench);
+
+	obj_bench->n_oid = diff_num;
+	if (obj_bench->op_mode < OP_MODE_ALL_OBJ) {
+		obj_bench->n_oid = one_num;
+		obj_bench->n_objs = 1;
+	}
+	obj_bench->fn_off = off_entire;
+	if (obj_bench->op_mode == OP_MODE_ONE_OBJ_RANGE ||
+	    obj_bench->op_mode == OP_MODE_ONE_OBJ_NESTED_RANGE) {
+		obj_bench->fn_off = off_range;
+		if (args->n_ops_per_thread > args->dsize)
+			args->dsize = args->n_ops_per_thread;
+
+		obj_bench->sizes[0] = args->dsize;
+	}
+	obj_bench->lib_op = (obj_bench->op_mode == OP_MODE_ONE_OBJ ||
+			     obj_bench->op_mode == OP_MODE_ALL_OBJ)
+		? ADD_RANGE_MODE_ONE_TX
+		: ADD_RANGE_MODE_NESTED_TX;
+	return 0;
+}
+
+/*
+ * dupa_exit -- common part for the exit function of the transactional
+ * benchmarks in their exit functions.
+ */
+int
+dupa_exit(struct benchmark *bench, struct benchmark_args *args)
+{
+	auto *obj_bench = (struct obj_tx_bench *)pmembench_get_priv(bench);
+	if (obj_bench->lib_mode != LIB_MODE_DRAM)
+		pmemobj_close(obj_bench->pop);
+
+	free(obj_bench->sizes);
+	if (obj_bench->type_mode == NUM_MODE_RAND)
+		free(obj_bench->random_types);
+	return 0;
+}
+
+/*
+ * dupa_init_worker -- special part for the worker
+ * initialization function for benchmarks which needs allocated objects
+ * before operation.
+ */
+static int
+dupa_init_worker(struct benchmark *bench,
+			     struct benchmark_args *args,
+			     struct worker_info *worker)
+{
+	unsigned i;
+	if (obj_tx_init_worker(bench, args, worker) != 0)
+		return -1;
+
+	auto *obj_bench = (struct obj_tx_bench *)pmembench_get_priv(bench);
+	auto *obj_worker = (struct obj_tx_worker *)worker->priv;
+	for (i = 0; i < obj_bench->n_objs; i++) {
+		if (alloc_op[obj_bench->lib_mode](obj_bench, worker, i) != 0)
+			goto out;
+	}
+	return 0;
+out:
+	for (; i > 0; i--)
+		free_op[obj_bench->lib_mode](obj_bench, worker, i - 1);
+	if (obj_bench->lib_mode == LIB_MODE_DRAM)
+		free(obj_worker->items);
+	else
+		free(obj_worker->oids);
+	free(obj_worker);
+	return -1;
+}
+
+/*
+ * dupa_exit_worker -- common part for the worker de-initialization.
+ */
+static void
+dupa_exit_worker(struct benchmark *bench, struct benchmark_args *args,
+		   struct worker_info *worker)
+{
+	auto *obj_bench = (struct obj_tx_bench *)pmembench_get_priv(bench);
+	auto *obj_worker = (struct obj_tx_worker *)worker->priv;
+	for (unsigned i = 0; i < obj_bench->n_objs; i++)
+		free_op[obj_bench->lib_op_free](obj_bench, worker, i);
+
+	if (obj_bench->lib_mode == LIB_MODE_DRAM)
+		free(obj_worker->items);
+	else
+		free(obj_worker->oids);
+	free(obj_worker);
+}
+
+/*
+ * dupa_op -- main operations of the obj_tx_add_range benchmark.
+ */
+static int
+dupa_op(struct benchmark *bench, struct operation_info *info)
+{
+	auto *obj_bench = (struct obj_tx_bench *)pmembench_get_priv(bench);
+	auto *obj_worker = (struct obj_tx_worker *)info->worker->priv;
+	if (add_range_op[obj_bench->lib_op](obj_bench, info->worker,
+					    info->index) != 0)
+		return -1;
+	obj_worker->tx_level = 0;
+	return 0;
+}
+
 /* Array defining common command line arguments. */
 static struct benchmark_clo obj_tx_clo[8];
 
@@ -1092,6 +1212,7 @@ static struct benchmark_info obj_tx_alloc;
 static struct benchmark_info obj_tx_free;
 static struct benchmark_info obj_tx_realloc;
 static struct benchmark_info obj_tx_add_range;
+static struct benchmark_info dupa;
 
 CONSTRUCTOR(pmemobj_tx_constructor)
 void
@@ -1244,4 +1365,21 @@ pmemobj_tx_constructor(void)
 	obj_tx_add_range.rm_file = true;
 	obj_tx_add_range.allow_poolset = true;
 	REGISTER_BENCHMARK(obj_tx_add_range);
+
+	dupa.name = "dupa";
+	dupa.brief = "dupa() benchmark";
+	dupa.init = dupa_init;
+	dupa.exit = dupa_exit;
+	dupa.multithread = true;
+	dupa.multiops = false;
+	dupa.init_worker = dupa_init_worker;
+	dupa.free_worker = dupa_exit_worker;
+	dupa.operation = dupa_op;
+	dupa.measure_time = true;
+	dupa.clos = obj_tx_clo;
+	dupa.nclos = ARRAY_SIZE(obj_tx_clo) - 5;
+	dupa.opts_size = sizeof(struct obj_tx_args);
+	dupa.rm_file = true;
+	dupa.allow_poolset = true;
+	REGISTER_BENCHMARK(dupa);
 }
